@@ -1,6 +1,6 @@
 plugins { id 'com.android.application' }
 android { namespace 'id.photobesok.booth'; compileSdk 35
-    defaultConfig { applicationId 'id.photobesok.booth'; minSdk 29; targetSdk 35; versionCode 4; versionName '0.4-offline-learning' }
+    defaultConfig { applicationId 'id.photobesok.booth'; minSdk 29; targetSdk 35; versionCode 5; versionName '0.5-studio' }
 }
 
 dependencies {

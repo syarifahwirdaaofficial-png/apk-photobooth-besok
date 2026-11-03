@@ -1,32 +1,24 @@
-# Photobesok Offline Learning 0.4
+# Photobesok Studio 0.5
 
-Android 10+ learning app for Xiaomi Pad 7. Native, local photo workflow; no account, payment, analytics or cloud runtime. This is an original implementation, not a patched OurBooth APK.
+Native offline Android photobooth for Android 10+. Original interface in forest, ivory and gold.
 
-## Features
-- Welcome screen and local session editor, 1–4 photo layouts.
-- Forest, Gold and White built-in frames; optional user-supplied PNG overlay.
-- CameraX front/back camera with 3-second timer; EXIF-aware photo decoding.
-- PNG export to Pictures/Photobesok via MediaStore.
-- Saved printer IP and TCP port 515 connectivity check.
-- Android print service with paper-aware PDF scaling and cancellation.
+## Guest journey
+Welcome → choose one of four photo layouts and three frame colors → automatic multi-photo camera session → review / retake → save PNG to Pictures/Photobesok → share or start the next session.
 
-## Printing limitation
-The port 515 button tests a TCP connection only. Native LPR print jobs and Epson raster encoding are NOT implemented. Android printing requires a compatible installed print service. A successful port test does not prove printable data compatibility. Validate output on the actual L8050 before event use.
+## Operator settings
+Event caption, countdown (2–10 seconds), front/back default camera, mirrored output, persistent PNG overlay, printer IP, TCP 515 connectivity check and Android print settings. The guest journey does not expose technical form fields.
 
-## Three-plugin collaboration
-- Library: consulted `laporan-inventaris-ourbooth.txt` to understand the prior asset inventory. No OurBooth binary, graphics or proprietary code is bundled.
-- Canva: editable visual concept https://canva.link/5dgqyqu2tm1cvyr . Android UI uses native controls, not a remote Canva page.
-- GitHub: source history and Actions compilation/lint; artifact `Photobesok-Offline-APK` contains the installable debug APK.
+## Printing
+Output is 1200×1800 PNG (4R at 300 dpi). Printing uses the installed Android print service. Native Epson LPR raster encoding is not implemented; port 515 is a TCP connectivity check only. Physical printer validation remains required.
+
+## Design references
+- https://docs.pixture.io/id/docs/tutorials/customise-kiosk-screens — separated guest screens and template/capture/review flow.
+- https://thephotoboothapp.com/how-the-photo-booth-app-works/ — event setup, guided capture, review and local results.
+No third-party artwork or app code copied. Layout illustrations are original Canvas drawings.
+
+## Validation
+GitHub Actions compiles the APK, runs Android lint, and launches an Android 10 tablet emulator. scripts/ui_smoke.py exercises welcome, layout, 3 automatic captures, review, MediaStore export, next session and operator settings, capturing real screen evidence. No production test hooks are enabled. Emulator validation does not replace a Xiaomi Pad 7 / Epson L8050 test.
 
 ## Build
-JDK 17, Android SDK 35, Gradle 8.9. Run `gradle :app:assembleDebug :app:lintDebug`. Internet is required for the initial build dependencies, not normal app use. The debug APK is for testing, not a production release.
-
-## Device acceptance checklist
-1. Deny camera permission, then grant it; verify graceful return and successful capture.
-2. Test both cameras, timer, background/resume, and JPEG orientation.
-3. Complete 1, 2, 3, 4 photos; change layout and confirm session resets.
-4. Test all frame styles, PNG import/removal, invalid dimensions and gallery export.
-5. Disable internet; verify capture, editing and gallery export still work.
-6. Join printer Wi-Fi, test reachable/unreachable port 515, then print using the installed Android service. Check physical 4R dimensions and cropping.
-
-No device or physical printer test has been performed by this build environment. Capture is one photo per camera visit; full automatic multi-shot, USB DSLR, payments and native LPR remain outside this version.
+JDK 17, Android SDK 35, Gradle 8.9: `gradle :app:assembleDebug :app:lintDebug`.
+Initial dependency download needs internet; capture, layout and save do not. Debug builds are for testing. USB DSLR, payment, cloud galleries and native LPR are not included.
