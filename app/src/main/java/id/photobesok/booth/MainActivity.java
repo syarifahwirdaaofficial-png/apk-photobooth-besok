@@ -47,7 +47,7 @@ public class MainActivity extends Activity {
     });
     button(root,"RESET SESI / HAPUS FOTO",()->{photos.clear();photo=null;composed=null;preview.setImageDrawable(null);status.setText("Sesi baru: 0/"+slots+" foto");});
     button(root,"1. PILIH FRAME PNG (OPSIONAL)",()->{Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT);i.setType("image/png");i.addCategory(Intent.CATEGORY_OPENABLE);startActivityForResult(i,PICK_FRAME);});
-    button(root,"2. AMBIL FOTO",()->new AlertDialog.Builder(this).setMessage("Foto diambil setelah 3 detik. Tekan OK lalu bersiap.").setPositiveButton("Mulai",(d,w)->new Handler(Looper.getMainLooper()).postDelayed(()->{Intent i=new Intent(MediaStore.ACTION_IMAGE_CAPTURE);try{startActivityForResult(i,CAPTURE);}catch(Exception e){toast("Aplikasi kamera tidak tersedia");}},3000)).setNegativeButton("Batal",null).show());
+    button(root,"2. AMBIL FOTO (KAMERA INTERNAL)",()->startActivityForResult(new Intent(this,CameraActivity.class),CAPTURE));
     button(root,"3. PREVIEW / TERAPKAN UKURAN",this::render);
     button(root,"4. SIMPAN PNG KE GALERI",this::save);
     TextView printer=new TextView(this);printer.setText("PRINTER LOKAL — Koneksi Wi-Fi / Wi-Fi Direct yang telah dikonfigurasi di Android");root.addView(printer);
@@ -59,7 +59,7 @@ public class MainActivity extends Activity {
   private EditText edit(LinearLayout root,String hint,String value){EditText e=new EditText(this);e.setSingleLine(true);e.setHint(hint);e.setText(value);root.addView(e);return e;}
   private void button(LinearLayout root,String title,Runnable run){Button b=new Button(this);b.setText(title);root.addView(b);b.setOnClickListener(v->run.run());}
   @Override protected void onActivityResult(int req,int result,Intent data){super.onActivityResult(req,result,data);if(result!=RESULT_OK||data==null)return;
-    try{if(req==CAPTURE){Object o=data.getExtras()==null?null:data.getExtras().get("data");if(o instanceof Bitmap){photo=(Bitmap)o;if(photos.size()>=slots)photos.clear();photos.add(photo);render();status.append(" • Foto "+photos.size()+"/"+slots);if(photos.size()<slots)toast("Ambil foto berikutnya: "+(photos.size()+1)+"/"+slots);} else toast("Kamera tidak mengembalikan foto");}
+    try{if(req==CAPTURE){String path=data.getStringExtra("photo_path");Bitmap o=path==null?null:BitmapFactory.decodeFile(path);if(o!=null){photo=o;if(photos.size()>=slots)photos.clear();photos.add(photo);render();status.append(" • Foto "+photos.size()+"/"+slots);if(photos.size()<slots)toast("Ambil foto berikutnya: "+(photos.size()+1)+"/"+slots);} else toast("Kamera tidak mengembalikan foto");}
       else if(req==PICK_FRAME){Uri uri=data.getData();if(uri!=null){try(InputStream in=getContentResolver().openInputStream(uri)){frame=BitmapFactory.decodeStream(in);}render();}}
     }catch(Exception e){toast("Gagal membaca foto/frame: "+e.getMessage());}
   }
