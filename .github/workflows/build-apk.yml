@@ -1,7 +1,7 @@
 name: Build Photobesok Offline APK
 on:
   push:
-    branches: [main]
+    branches: [main, "photobesok/**"]
   workflow_dispatch:
 jobs:
   build:
@@ -27,7 +27,7 @@ jobs:
         with:
           gradle-version: '8.9'
       - name: Build debug APK
-        run: gradle --no-daemon --stacktrace :app:assembleDebug
+        run: gradle --no-daemon --stacktrace :app:assembleDebug :app:lintDebug
       - name: Upload debug APK
         if: success()
         uses: actions/upload-artifact@v4
@@ -35,3 +35,4 @@ jobs:
           name: Photobesok-Offline-APK
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+

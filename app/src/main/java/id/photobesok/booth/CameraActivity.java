@@ -1,20 +1,44 @@
 package id.photobesok.booth;
-import android.app.*;import android.os.*;import android.Manifest;import android.content.*;import android.content.pm.PackageManager;
-import android.graphics.*;import android.hardware.camera2.*;import android.media.Image;import android.media.ImageReader;
-import android.view.*;import android.widget.*;import java.io.*;import java.nio.ByteBuffer;import java.util.*;
 
-public class CameraActivity extends Activity {
- private TextureView view;private CameraDevice camera;private CameraCaptureSession session;private ImageReader reader;private HandlerThread thread;private Handler handler;private String cameraId;private int facing=CameraCharacteristics.LENS_FACING_FRONT;
- private TextView countdown;private final Handler ui=new Handler(Looper.getMainLooper());
- @Override public void onCreate(Bundle b){super.onCreate(b);getWindow().setFlags(1024,1024);FrameLayout root=new FrameLayout(this);view=new TextureView(this);root.addView(view,new FrameLayout.LayoutParams(-1,-1));countdown=new TextView(this);countdown.setTextColor(0xffffffff);countdown.setTextSize(64);countdown.setGravity(Gravity.CENTER);root.addView(countdown,new FrameLayout.LayoutParams(-1,-1));LinearLayout buttons=new LinearLayout(this);buttons.setOrientation(LinearLayout.HORIZONTAL);Button shot=new Button(this);shot.setText("AMBIL FOTO (3 DETIK)");buttons.addView(shot,new LinearLayout.LayoutParams(0,-2,1));Button flip=new Button(this);flip.setText("BALIK KAMERA");buttons.addView(flip,new LinearLayout.LayoutParams(0,-2,1));FrameLayout.LayoutParams bp=new FrameLayout.LayoutParams(-1,-2,Gravity.BOTTOM);root.addView(buttons,bp);setContentView(root);shot.setOnClickListener(v->count(3));flip.setOnClickListener(v->{facing=facing==CameraCharacteristics.LENS_FACING_FRONT?CameraCharacteristics.LENS_FACING_BACK:CameraCharacteristics.LENS_FACING_FRONT;closeCamera();openCamera();});view.setSurfaceTextureListener(new TextureView.SurfaceTextureListener(){public void onSurfaceTextureAvailable(SurfaceTexture s,int w,int h){openCamera();}public void onSurfaceTextureSizeChanged(SurfaceTexture s,int w,int h){}public boolean onSurfaceTextureDestroyed(SurfaceTexture s){return true;}public void onSurfaceTextureUpdated(SurfaceTexture s){}});}
- @Override protected void onResume(){super.onResume();thread=new HandlerThread("photobesok-camera");thread.start();handler=new Handler(thread.getLooper());if(view.isAvailable())openCamera();}
- private void openCamera(){if(Build.VERSION.SDK_INT>=23&&checkSelfPermission(Manifest.permission.CAMERA)!=PackageManager.PERMISSION_GRANTED){requestPermissions(new String[]{Manifest.permission.CAMERA},9);return;}try{CameraManager manager=(CameraManager)getSystemService(CAMERA_SERVICE);cameraId=null;for(String id:manager.getCameraIdList()){Integer f=manager.getCameraCharacteristics(id).get(CameraCharacteristics.LENS_FACING);if(f!=null&&f==facing){cameraId=id;break;}}if(cameraId==null){toast("Kamera tidak ditemukan");return;}reader=ImageReader.newInstance(1920,1080,android.graphics.ImageFormat.JPEG,2);reader.setOnImageAvailableListener(r->{try(Image image=r.acquireLatestImage()){if(image==null)return;ByteBuffer buf=image.getPlanes()[0].getBuffer();byte[] bytes=new byte[buf.remaining()];buf.get(bytes);File file=new File(getCacheDir(),"photobesok_capture.jpg");try(FileOutputStream out=new FileOutputStream(file)){out.write(bytes);}Intent result=new Intent();result.putExtra("photo_path",file.getAbsolutePath());runOnUiThread(()->{setResult(RESULT_OK,result);finish();});}catch(Exception e){runOnUiThread(()->toast(e.getMessage()));}},handler);manager.openCamera(cameraId,new CameraDevice.StateCallback(){public void onOpened(CameraDevice c){camera=c;preview();}public void onDisconnected(CameraDevice c){c.close();camera=null;}public void onError(CameraDevice c,int error){c.close();camera=null;}},handler);}catch(Exception e){toast("Kamera gagal: "+e.getMessage());}}
- private void preview(){try{SurfaceTexture t=view.getSurfaceTexture();if(t==null)return;t.setDefaultBufferSize(1920,1080);Surface surface=new Surface(t);CaptureRequest.Builder request=camera.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);request.addTarget(surface);camera.createCaptureSession(Arrays.asList(surface,reader.getSurface()),new CameraCaptureSession.StateCallback(){public void onConfigured(CameraCaptureSession s){session=s;try{session.setRepeatingRequest(request.build(),null,handler);}catch(Exception ignored){}}public void onConfigureFailed(CameraCaptureSession s){toast("Preview gagal");}},handler);}catch(Exception e){toast(e.getMessage());}}
- private void count(int n){if(n==0){countdown.setText("");capture();return;}countdown.setText(""+n);ui.postDelayed(()->count(n-1),1000);}
- private void capture(){if(camera==null||session==null)return;try{CaptureRequest.Builder b=camera.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE);b.addTarget(reader.getSurface());b.set(CaptureRequest.CONTROL_AF_MODE,CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE);session.capture(b.build(),null,handler);}catch(Exception e){toast("Foto gagal: "+e.getMessage());}}
- private void closeCamera(){if(session!=null){session.close();session=null;}if(camera!=null){camera.close();camera=null;}if(reader!=null){reader.close();reader=null;}}
- @Override public void onRequestPermissionsResult(int request,String[] p,int[] grants){super.onRequestPermissionsResult(request,p,grants);if(request==9&&grants.length>0&&grants[0]==PackageManager.PERMISSION_GRANTED)openCamera();else finish();}
- @Override protected void onPause(){closeCamera();super.onPause();}
- @Override protected void onDestroy(){if(thread!=null)thread.quitSafely();super.onDestroy();}
- private void toast(String s){runOnUiThread(()->Toast.makeText(this,s,Toast.LENGTH_LONG).show());}
+import android.Manifest;
+import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.os.*;
+import android.view.*;
+import android.widget.*;
+import androidx.activity.ComponentActivity;
+import androidx.camera.core.*;
+import androidx.camera.lifecycle.ProcessCameraProvider;
+import androidx.camera.view.PreviewView;
+import androidx.core.content.ContextCompat;
+import com.google.common.util.concurrent.ListenableFuture;
+import java.io.File;
+
+/** Lifecycle-bound camera. JPEG rotation is preserved and decoded by MainActivity. */
+public class CameraActivity extends ComponentActivity {
+ private PreviewView preview;
+ private TextView countdown;
+ private Button shot,flip;
+ private ImageCapture capture;
+ private ProcessCameraProvider provider;
+ private int facing=CameraSelector.LENS_FACING_FRONT;
+ private boolean busy=false,active=false;
+ private final Handler ui=new Handler(Looper.getMainLooper());
+ @Override public void onCreate(Bundle state){super.onCreate(state);
+  getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+  FrameLayout root=new FrameLayout(this);preview=new PreviewView(this);root.addView(preview,new FrameLayout.LayoutParams(-1,-1));
+  countdown=new TextView(this);countdown.setTextSize(72);countdown.setTextColor(0xffffffff);countdown.setGravity(Gravity.CENTER);root.addView(countdown,new FrameLayout.LayoutParams(-1,-1));
+  LinearLayout controls=new LinearLayout(this);shot=new Button(this);shot.setText("AMBIL FOTO · 3 DETIK");flip=new Button(this);flip.setText("BALIK KAMERA");controls.addView(shot,new LinearLayout.LayoutParams(0,-2,1));controls.addView(flip,new LinearLayout.LayoutParams(0,-2,1));FrameLayout.LayoutParams bp=new FrameLayout.LayoutParams(-1,-2,Gravity.BOTTOM);bp.bottomMargin=36;root.addView(controls,bp);setContentView(root);
+  shot.setEnabled(false);shot.setOnClickListener(v->{if(!busy&&capture!=null){busy=true;shot.setEnabled(false);flip.setEnabled(false);count(3);}});
+  flip.setOnClickListener(v->{facing=facing==CameraSelector.LENS_FACING_FRONT?CameraSelector.LENS_FACING_BACK:CameraSelector.LENS_FACING_FRONT;bind();});
+  if(checkSelfPermission(Manifest.permission.CAMERA)==PackageManager.PERMISSION_GRANTED)open();else requestPermissions(new String[]{Manifest.permission.CAMERA},9);
+ }
+ private void open(){ListenableFuture<ProcessCameraProvider> future=ProcessCameraProvider.getInstance(this);future.addListener(()->{try{if(isDestroyed())return;provider=future.get();bind();}catch(Exception e){error(e);}},ContextCompat.getMainExecutor(this));}
+ private void bind(){if(provider==null)return;try{CameraSelector selector=new CameraSelector.Builder().requireLensFacing(facing).build();if(!provider.hasCamera(selector)){facing=facing==CameraSelector.LENS_FACING_FRONT?CameraSelector.LENS_FACING_BACK:CameraSelector.LENS_FACING_FRONT;selector=new CameraSelector.Builder().requireLensFacing(facing).build();}provider.unbindAll();Preview live=new Preview.Builder().build();live.setSurfaceProvider(preview.getSurfaceProvider());capture=new ImageCapture.Builder().setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY).build();provider.bindToLifecycle(this,selector,live,capture);shot.setEnabled(true);}catch(Exception e){error(e);}}
+ private void count(int n){if(!active)return;if(n>0){countdown.setText(String.valueOf(n));ui.postDelayed(()->count(n-1),1000);return;}countdown.setText("");if(capture==null){reset();return;}capture.setTargetRotation(preview.getDisplay().getRotation());File file=new File(getCacheDir(),"photobesok_capture.jpg");capture.takePicture(new ImageCapture.OutputFileOptions.Builder(file).build(),ContextCompat.getMainExecutor(this),new ImageCapture.OnImageSavedCallback(){public void onImageSaved(ImageCapture.OutputFileResults result){if(!active)return;setResult(RESULT_OK,new Intent().putExtra("photo_path",file.getAbsolutePath()));finish();}public void onError(ImageCaptureException e){error(e);reset();}});}
+ private void reset(){busy=false;countdown.setText("");shot.setEnabled(capture!=null);flip.setEnabled(true);}
+ private void error(Exception e){Toast.makeText(this,"Kamera: "+e.getMessage(),Toast.LENGTH_LONG).show();}
+ @Override public void onRequestPermissionsResult(int code,String[] permissions,int[] grants){super.onRequestPermissionsResult(code,permissions,grants);if(code==9&&grants.length>0&&grants[0]==PackageManager.PERMISSION_GRANTED)open();else{Toast.makeText(this,"Izin kamera diperlukan untuk mengambil foto.",Toast.LENGTH_LONG).show();finish();}}
+ @Override protected void onResume(){super.onResume();active=true;reset();}
+ @Override protected void onPause(){active=false;ui.removeCallbacksAndMessages(null);reset();super.onPause();}
 }
