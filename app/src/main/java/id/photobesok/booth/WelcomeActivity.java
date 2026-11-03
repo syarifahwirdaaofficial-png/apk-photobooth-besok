@@ -12,7 +12,7 @@ import android.widget.*;
 public class WelcomeActivity extends Activity {
  @Override public void onCreate(Bundle state){super.onCreate(state);
   getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-  LinearLayout root=new LinearLayout(this);root.setOrientation(1);root.setGravity(Gravity.CENTER);root.setPadding(32,48,32,48);root.setBackgroundColor(Color.rgb(19,59,46));
+  LinearLayout root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);root.setGravity(Gravity.CENTER);root.setPadding(32,48,32,48);root.setBackgroundColor(Color.rgb(19,59,46));
   TextView brand=text("PHOTOBESOK / STUDIO",18);root.addView(brand);
   TextView heading=text("Senyum dulu,\nyuk!",48);heading.setTypeface(Typeface.DEFAULT,Typeface.BOLD);LinearLayout.LayoutParams hp=new LinearLayout.LayoutParams(-1,-2);hp.topMargin=48;root.addView(heading,hp);
   TextView strip=text("01  ·  02  ·  03\nMomen kecil, kenangan besar.",22);strip.setPadding(20,40,20,40);root.addView(strip);

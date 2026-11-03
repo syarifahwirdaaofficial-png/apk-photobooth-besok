@@ -30,7 +30,7 @@ public class MainActivity extends Activity {
 
   @Override public void onCreate(Bundle b){super.onCreate(b);
     getWindow().setFlags(1024,1024);
-    LinearLayout root=new LinearLayout(this);root.setOrientation(1);root.setPadding(20,20,20,20);root.setBackgroundColor(Color.rgb(244,247,245));
+    LinearLayout root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);root.setPadding(20,20,20,20);root.setBackgroundColor(Color.rgb(244,247,245));
     ScrollView scroll=new ScrollView(this);scroll.addView(root);setContentView(scroll);
     TextView title=new TextView(this);title.setText("PHOTOBESOK  •  STUDIO OFFLINE");title.setTextSize(22);title.setTextColor(Color.rgb(22,74,56));root.addView(title);
     status=new TextView(this);status.setText("Tanpa internet / akun / QRIS. Wi-Fi hanya untuk printer lokal.");root.addView(status);
