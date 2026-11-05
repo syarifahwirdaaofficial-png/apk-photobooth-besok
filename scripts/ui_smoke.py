@@ -1,7 +1,14 @@
 """Exercise real installed Android screens; save evidence without app test hooks."""
-import subprocess,time,xml.etree.ElementTree as ET,re,pathlib
+import subprocess,time,xml.etree.ElementTree as ET,re,pathlib,atexit
 out=pathlib.Path('ui-evidence');out.mkdir(exist_ok=True)
 def adb(*args):return subprocess.check_output(['adb',*args],stderr=subprocess.STDOUT)
+def diagnostics():
+ (out/'runtime.txt').write_bytes(adb('logcat','-d'))
+ (out/'activity.txt').write_bytes(adb('shell','dumpsys','activity','activities'))
+ try:
+  adb('shell','uiautomator','dump','/sdcard/window.xml');(out/'window.xml').write_bytes(adb('shell','cat','/sdcard/window.xml'))
+ except Exception:pass
+atexit.register(diagnostics)
 def shot(name):
  (out/(name+'.png')).write_bytes(adb('exec-out','screencap','-p'))
 def click(label,timeout=25):
