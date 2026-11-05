@@ -17,7 +17,11 @@ def click(label,timeout=25):
   try:
    adb('shell','uiautomator','dump','/sdcard/window.xml')
    xml=adb('shell','cat','/sdcard/window.xml')
-   for n in ET.fromstring(xml).iter('node'):
+   nodes=list(ET.fromstring(xml).iter('node'))
+   for popup in nodes:
+    if popup.get('resource-id')=='android:id/ok' and popup.get('text') in ['GOT IT','OK']:
+     x,y,x2,y2=map(int,re.findall(r'\d+',popup.get('bounds')));adb('shell','input','tap',str((x+x2)//2),str((y+y2)//2));time.sleep(1)
+   for n in nodes:
     if label in (n.get('text','')+' '+n.get('content-desc','')):
      if n.get('enabled')=='false':continue
      nums=list(map(int,re.findall(r'\d+',n.get('bounds',''))))
@@ -26,6 +30,7 @@ def click(label,timeout=25):
   except Exception:pass
   time.sleep(1)
  raise RuntimeError('Control not found: '+label)
+adb('shell','settings','put','secure','immersive_mode_confirmations','confirmed')
 adb('shell','pm','grant','id.photobesok.booth','android.permission.CAMERA')
 adb('shell','am','start','-W','-n','id.photobesok.booth/.WelcomeActivity');time.sleep(3)
 shot('01-welcome')
