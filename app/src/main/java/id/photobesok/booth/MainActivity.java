@@ -10,91 +10,65 @@ import android.view.*;
 import android.widget.*;
 import java.io.*;
 import java.net.*;
+import java.util.*;
 import java.util.concurrent.*;
 
-/** Offline proof-of-concept: no analytics, authentication, payment, or cloud. */
 public class MainActivity extends Activity {
-  private static final int CAPTURE=11, PICK_FRAME=12;
-  private final java.util.ArrayList<Bitmap> photos=new java.util.ArrayList<>();
-  private int slots=1;
-  private Spinner slotSelector;
-  private final ExecutorService io=Executors.newSingleThreadExecutor();
-  private ImageView preview;
-  private Bitmap photo, frame, composed;
-  private EditText printerIp, widthPx, heightPx;
-  private Spinner preset;
-  private TextView status;
-  private final String[] sizes={"4R portrait (1200 × 1800)","4R landscape (1800 × 1200)","Strip portrait (945 × 2126)","Square (1200 × 1200)","Custom"};
-  private final int[][] dimensions={{1200,1800},{1800,1200},{945,2126},{1200,1200}};
-
-  @Override public void onCreate(Bundle b){super.onCreate(b);
-    getWindow().setFlags(1024,1024);
-    LinearLayout root=new LinearLayout(this);root.setOrientation(1);root.setPadding(20,20,20,20);root.setBackgroundColor(Color.rgb(244,247,245));
-    ScrollView scroll=new ScrollView(this);scroll.addView(root);setContentView(scroll);
-    TextView title=new TextView(this);title.setText("PHOTOBESOK  •  OFFLINE DEMO");title.setTextSize(22);title.setTextColor(Color.rgb(22,74,56));root.addView(title);
-    status=new TextView(this);status.setText("Tanpa internet / akun / QRIS. Wi-Fi hanya untuk printer lokal.");root.addView(status);
-    preview=new ImageView(this);preview.setBackgroundColor(Color.WHITE);preview.setScaleType(ImageView.ScaleType.FIT_CENTER);root.addView(preview,new LinearLayout.LayoutParams(-1,440));
-    preset=new Spinner(this);ArrayAdapter<String> a=new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,sizes);preset.setAdapter(a);root.addView(preset);
-    widthPx=edit(root,"Lebar output (pixel)","1200");heightPx=edit(root,"Tinggi output (pixel)","1800");
-    preset.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){public void onNothingSelected(android.widget.AdapterView<?> p){}public void onItemSelected(android.widget.AdapterView<?> p,View v,int position,long id){if(position<dimensions.length){widthPx.setText(""+dimensions[position][0]);heightPx.setText(""+dimensions[position][1]);}render();}});
-    slotSelector=new Spinner(this);
-    String[] slotOptions={"1 foto","2 foto vertikal","3 foto vertikal","4 foto grid 2×2"};
-    slotSelector.setAdapter(new ArrayAdapter<String>(this,android.R.layout.simple_spinner_dropdown_item,slotOptions));
-    root.addView(slotSelector);
-    slotSelector.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){
-      public void onNothingSelected(android.widget.AdapterView<?> p){}
-      public void onItemSelected(android.widget.AdapterView<?> p,View v,int pos,long id){slots=pos+1;render();}
-    });
-    button(root,"RESET SESI / HAPUS FOTO",()->{photos.clear();photo=null;composed=null;preview.setImageDrawable(null);status.setText("Sesi baru: 0/"+slots+" foto");});
-    button(root,"1. PILIH FRAME PNG (OPSIONAL)",()->{Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT);i.setType("image/png");i.addCategory(Intent.CATEGORY_OPENABLE);startActivityForResult(i,PICK_FRAME);});
-    button(root,"2. AMBIL FOTO (KAMERA INTERNAL)",()->startActivityForResult(new Intent(this,CameraActivity.class),CAPTURE));
-    button(root,"3. PREVIEW / TERAPKAN UKURAN",this::render);
-    button(root,"4. SIMPAN PNG KE GALERI",this::save);
-    TextView printer=new TextView(this);printer.setText("PRINTER LOKAL — Koneksi Wi-Fi / Wi-Fi Direct yang telah dikonfigurasi di Android");root.addView(printer);
-    printerIp=edit(root,"IP Epson L8050","192.168.1.50");
-    button(root,"UJI KONEKSI PORT 515",this::testPort);
-    button(root,"CETAK VIA LAYANAN CETAK ANDROID",this::printAndroid);
-    TextView note=new TextView(this);note.setText("Catatan: uji TCP bukan bukti printer mendukung format cetak. Cetak memakai layanan Android yang terpasang; pengiriman LPR native belum tersedia.");root.addView(note);
-  }
-  private EditText edit(LinearLayout root,String hint,String value){EditText e=new EditText(this);e.setSingleLine(true);e.setHint(hint);e.setText(value);root.addView(e);return e;}
-  private void button(LinearLayout root,String title,Runnable run){Button b=new Button(this);b.setText(title);root.addView(b);b.setOnClickListener(v->run.run());}
-  @Override protected void onActivityResult(int req,int result,Intent data){super.onActivityResult(req,result,data);if(result!=RESULT_OK||data==null)return;
-    try{if(req==CAPTURE){String path=data.getStringExtra("photo_path");Bitmap o=path==null?null:BitmapFactory.decodeFile(path);if(o!=null){photo=o;if(photos.size()>=slots)photos.clear();photos.add(photo);render();status.append(" • Foto "+photos.size()+"/"+slots);if(photos.size()<slots)toast("Ambil foto berikutnya: "+(photos.size()+1)+"/"+slots);} else toast("Kamera tidak mengembalikan foto");}
-      else if(req==PICK_FRAME){Uri uri=data.getData();if(uri!=null){try(InputStream in=getContentResolver().openInputStream(uri)){frame=BitmapFactory.decodeStream(in);}render();}}
-    }catch(Exception e){toast("Gagal membaca foto/frame: "+e.getMessage());}
-  }
-  private void render(){if(photos.isEmpty()){status.setText("Pilih ukuran dan frame, lalu ambil foto.");return;}try{
-    int w=Integer.parseInt(widthPx.getText().toString().trim()),h=Integer.parseInt(heightPx.getText().toString().trim());if(w<100||h<100||((long)w*h)>18000000L)throw new IllegalArgumentException("Ukuran 100 px minimum, 18 MP maksimum");
-    Bitmap out=Bitmap.createBitmap(w,h,Bitmap.Config.ARGB_8888);Canvas c=new Canvas(out);c.drawColor(Color.WHITE);Paint p=new Paint(Paint.ANTI_ALIAS_FLAG|Paint.FILTER_BITMAP_FLAG);
-    for(int i=0;i<slots;i++){
-      int col=slots==4?i%2:0,row=slots==4?i/2:i;
-      int cols=slots==4?2:1, rows=slots==4?2:slots;
-      Rect target=new Rect(col*w/cols,row*h/rows,(col+1)*w/cols,(row+1)*h/rows);
-      if(i<photos.size()){
-        Bitmap current=photos.get(i);
-        float scale=Math.max((float)target.width()/current.getWidth(),(float)target.height()/current.getHeight());
-        int sw=Math.min(current.getWidth(),Math.round(target.width()/scale)),sh=Math.min(current.getHeight(),Math.round(target.height()/scale));
-        int x=(current.getWidth()-sw)/2,y=(current.getHeight()-sh)/2;
-        c.drawBitmap(current,new Rect(x,y,x+sw,y+sh),target,p);
-      }else{
-        p.setColor(Color.rgb(232,237,234));c.drawRect(target,p);
-        p.setColor(Color.DKGRAY);p.setTextSize(Math.max(18,w/30));c.drawText("FOTO "+(i+1),target.left+20,target.centerY(),p);p.setColor(Color.WHITE);
-      }
-    }
-    if(frame!=null)c.drawBitmap(frame,null,new Rect(0,0,w,h),p);
-    composed=out;preview.setImageBitmap(out);status.setText("Preview: "+w+" × "+h+" px • "+photos.size()+"/"+slots+" foto"+(frame==null?" (tanpa overlay)":" (frame PNG)"));
-  }catch(Exception e){toast("Ukuran tidak valid: "+e.getMessage());}}
-  private void save(){if(composed==null||photos.size()<slots){toast("Lengkapi semua foto terlebih dahulu");return;}try{
-    android.content.ContentValues v=new android.content.ContentValues();v.put(MediaStore.Images.Media.DISPLAY_NAME,"photobesok_"+System.currentTimeMillis()+".png");v.put(MediaStore.Images.Media.MIME_TYPE,"image/png");if(Build.VERSION.SDK_INT>=29)v.put(MediaStore.Images.Media.RELATIVE_PATH,"Pictures/Photobesok");
-    Uri uri=getContentResolver().insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI,v);if(uri==null)throw new IOException("Tidak bisa membuat file");try(OutputStream os=getContentResolver().openOutputStream(uri)){if(os==null||!composed.compress(Bitmap.CompressFormat.PNG,100,os))throw new IOException("Gagal menulis gambar");}toast("Disimpan ke Pictures/Photobesok");
-  }catch(Exception e){toast("Gagal menyimpan: "+e.getMessage());}}
-  private void testPort(){String ip=printerIp.getText().toString().trim();if(ip.isEmpty()){toast("Isi IP printer");return;}io.execute(()->{String message;try(Socket s=new Socket()){s.connect(new InetSocketAddress(ip,515),3000);message="TCP 515 terbuka. Kemampuan cetak belum terbukti.";}catch(Exception e){message="Tidak terhubung: "+e.getMessage();}final String m=message;runOnUiThread(()->toast(m));});}
-  private void printAndroid(){if(composed==null||photos.size()<slots){toast("Lengkapi semua foto terlebih dahulu");return;}android.print.PrintManager pm=(android.print.PrintManager)getSystemService(PRINT_SERVICE);if(pm==null){toast("Layanan cetak Android tidak tersedia");return;}
+ private static final int CAPTURE=11,FRAME=12;
+ private final ExecutorService io=Executors.newSingleThreadExecutor();
+ private final ArrayList<String> paths=new ArrayList<>();
+ private LinearLayout root,body;private String page="home";private int slots=3,style=0;private Bitmap composed;private Uri saved;private boolean saving=false;
+ private android.content.SharedPreferences prefs;
+ private int d(float n){return Ui.dp(this,n);}
+ private String event(){return prefs.getString("event","Little moments, forever.");}
+ @Override public void onCreate(Bundle state){super.onCreate(state);prefs=getSharedPreferences("studio",0);Ui.full(this);if(state!=null){slots=state.getInt("slots",3);style=state.getInt("style");page=state.getString("page","home");ArrayList<String> restored=state.getStringArrayList("paths");if(restored!=null)paths.addAll(restored);String uri=state.getString("saved");if(uri!=null)saved=Uri.parse(uri);}show();}
+ @Override protected void onSaveInstanceState(Bundle b){super.onSaveInstanceState(b);b.putInt("slots",slots);b.putInt("style",style);b.putString("page",page);b.putStringArrayList("paths",paths);if(saved!=null)b.putString("saved",saved.toString());}
+ private void show(){if("layout".equals(page))layouts();else if("review".equals(page)&&!paths.isEmpty())review();else if("settings".equals(page))settings();else if("done".equals(page)&&saved!=null)done();else home();}
+ private void base(int bg){root=Ui.column(this);root.setBackgroundColor(bg);root.setPadding(d(24),d(30),d(24),d(22));ScrollView scroll=new ScrollView(this);scroll.setFillViewport(true);scroll.addView(root);setContentView(scroll);root.setAlpha(1);}
+ private void header(String right,Runnable action,boolean dark){LinearLayout row=new LinearLayout(this);row.setGravity(Gravity.CENTER_VERTICAL);TextView mark=Ui.text(this,"P / PHOTOBESOK",17,dark?Color.WHITE:Ui.INK,true);mark.setLetterSpacing(.12f);row.addView(mark,new LinearLayout.LayoutParams(0,d(56),1));mark.setGravity(Gravity.CENTER_VERTICAL);if(right!=null){Button b=Ui.button(this,right,false,action);row.addView(b,new LinearLayout.LayoutParams(-2,d(52)));}root.addView(row);}
+ private void label(String text){TextView t=Ui.text(this,text,12,Ui.MUTED,true);t.setLetterSpacing(.16f);root.addView(t);Ui.gap(root,12);}
+ private void title(String title,String subtitle){root.addView(Ui.serif(this,title,36,Ui.INK));Ui.gap(root,8);root.addView(Ui.text(this,subtitle,16,Ui.MUTED,false));Ui.gap(root,24);}
+ private void wideButton(LinearLayout parent,String text,boolean primary,Runnable action){Button b=Ui.button(this,text,primary,action);parent.addView(b,new LinearLayout.LayoutParams(-1,d(62)));}
+ private void go(String p){page=p;show();}
+ private void home(){page="home";base(Ui.INK);header("Pengaturan",()->go("settings"),true);Ui.gap(root,26);
+  boolean wide=getResources().getConfiguration().screenWidthDp>=650;LinearLayout hero=new LinearLayout(this);hero.setOrientation(wide?LinearLayout.HORIZONTAL:LinearLayout.VERTICAL);hero.setGravity(Gravity.CENTER_VERTICAL);
+  LinearLayout words=Ui.column(this);TextView tag=Ui.text(this,"THE OFFLINE PHOTO EXPERIENCE",11,Ui.GOLD,true);tag.setLetterSpacing(.18f);words.addView(tag);Ui.gap(words,22);words.addView(Ui.serif(this,"Momen kecil.\nKenangan besar.",wide?52:43,Ui.PAPER));Ui.gap(words,20);words.addView(Ui.text(this,"Datang apa adanya.\nPulang membawa cerita.",18,0xffc4d1c6,false));Ui.gap(words,24);TextView badge=Ui.text(this,"●  SIAP MENGABADIKAN MOMEN",11,Ui.GOLD,true);words.addView(badge);
+  Ui.Artwork art=new Ui.Artwork(this,3,1,true);
+  if(wide){hero.addView(words,new LinearLayout.LayoutParams(0,-2,1));hero.addView(art,new LinearLayout.LayoutParams(0,d(450),1));}else{hero.addView(words);hero.addView(art,new LinearLayout.LayoutParams(-1,d(285)));}
+  root.addView(hero,new LinearLayout.LayoutParams(-1,0,1));Ui.gap(root,20);wideButton(root,"Mulai sesi foto   →",true,()->{newSession();go("layout");});Ui.gap(root,14);TextView footer=Ui.text(this,"PILIH FRAME   /   PASANG POSE   /   SIMPAN MOMEN",10,0xffc4d1c6,false);footer.setGravity(Gravity.CENTER);footer.setLetterSpacing(.12f);root.addView(footer);
+ }
+ private void layouts(){page="layout";base(Ui.PAPER);header("Kembali",()->go("home"),false);Ui.gap(root,24);label("01 / PILIH TAMPILAN");title("Bingkai ceritamu.","Pilih susunan foto dan warna yang kamu suka.");
+  String[] names={"The Portrait","The Duo","The Story","The Four"};String[] desc={"1 foto · satu momen","2 foto · berdua lebih seru","3 foto · cerita berurutan","4 foto · semua ekspresi"};
+  for(int row=0;row<2;row++){LinearLayout line=new LinearLayout(this);for(int col=0;col<2;col++){final int n=row*2+col+1;LinearLayout card=Ui.column(this);card.setPadding(d(12),d(10),d(12),d(14));card.setBackground(Ui.border(this,Color.WHITE,slots==n));card.addView(new Ui.Artwork(this,n,style,false),new LinearLayout.LayoutParams(-1,d(140)));Ui.gap(card,8);card.addView(Ui.text(this,(slots==n?"●  ":"")+names[n-1],16,Ui.INK,true));card.addView(Ui.text(this,desc[n-1],12,Ui.MUTED,false));card.setContentDescription("Pilih "+n+" foto");card.setFocusable(true);card.setOnClickListener(v->{slots=n;layouts();});LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(0,-2,1);lp.setMargins(col==0?0:d(6),0,col==0?d(6):0,d(12));line.addView(card,lp);}root.addView(line);}
+  Ui.gap(root,12);label("WARNA FRAME");LinearLayout colors=new LinearLayout(this);String[] labels={"Forest","Ivory","Rose"};for(int i=0;i<3;i++){final int n=i;Button b=Ui.button(this,(style==i?"● ":"")+labels[i],false,()->{style=n;layouts();});b.setBackground(Ui.border(this,Ui.theme(i),style==i));b.setTextColor(Ui.themeText(i));LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(0,d(54),1);lp.setMargins(0,0,d(6),0);colors.addView(b,lp);}root.addView(colors);Ui.gap(root,22);wideButton(root,"Lanjut ke kamera   →",true,this::startCamera);Ui.gap(root,10);root.addView(Ui.text(this,slots+" foto otomatis • Jeda "+prefs.getInt("timer",3)+" detik • Format 4R",12,Ui.MUTED,false));
+ }
+ private void newSession(){for(String path:paths)new File(path).delete();paths.clear();composed=null;saved=null;}
+ private void startCamera(){startActivityForResult(new Intent(this,CameraActivity.class).putExtra("count",slots).putExtra("seconds",prefs.getInt("timer",3)).putExtra("front",prefs.getBoolean("front",true)),CAPTURE);}
+ @Override protected void onActivityResult(int req,int result,Intent data){super.onActivityResult(req,result,data);if(result!=RESULT_OK||data==null)return;if(req==CAPTURE){ArrayList<String> resultPaths=data.getStringArrayListExtra("photos");if(resultPaths!=null&&resultPaths.size()==slots){newSession();paths.addAll(resultPaths);go("review");}else toast("Sesi belum lengkap. Silakan coba kembali.");}else if(req==FRAME&&data.getData()!=null){try(InputStream in=getContentResolver().openInputStream(data.getData())){BitmapFactory.Options o=new BitmapFactory.Options();o.inJustDecodeBounds=true;BitmapFactory.decodeStream(in,null,o);if(o.outWidth<=0||o.outHeight<=0||((long)o.outWidth*o.outHeight)>18000000L)throw new IOException("Gunakan PNG maksimum 18 MP");try(InputStream source=getContentResolver().openInputStream(data.getData());OutputStream out=new FileOutputStream(new File(getFilesDir(),"overlay.png"))){byte[] buf=new byte[8192];int read;while((read=source.read(buf))!=-1)out.write(buf,0,read);}toast("Overlay berhasil dipasang");settings();}catch(Exception e){toast("Frame tidak dapat dibaca: "+e.getMessage());}}}
+ private Bitmap photo(String path)throws IOException{BitmapFactory.Options o=new BitmapFactory.Options();o.inJustDecodeBounds=true;BitmapFactory.decodeFile(path,o);o.inSampleSize=1;while(Math.max(o.outWidth,o.outHeight)/o.inSampleSize>2200)o.inSampleSize*=2;o.inJustDecodeBounds=false;Bitmap b=BitmapFactory.decodeFile(path,o);if(b==null)throw new IOException("Foto tidak ditemukan");androidx.exifinterface.media.ExifInterface exif=new androidx.exifinterface.media.ExifInterface(path);Matrix m=new Matrix();if(exif.isFlipped())m.postScale(-1,1);m.postRotate(exif.getRotationDegrees());if(prefs.getBoolean("mirror",false))m.postScale(-1,1);Bitmap rotated=Bitmap.createBitmap(b,0,0,b.getWidth(),b.getHeight(),m,true);if(rotated!=b)b.recycle();return rotated;}
+ private void compose()throws IOException{int w=1200,h=1800;Bitmap out=Bitmap.createBitmap(w,h,Bitmap.Config.ARGB_8888);Canvas c=new Canvas(out);c.drawColor(Ui.theme(style));Paint p=new Paint(3);for(int i=0;i<paths.size();i++){Bitmap b=photo(paths.get(i));Rect dest=Ui.slot(i,slots,w,h);float scale=Math.max((float)dest.width()/b.getWidth(),(float)dest.height()/b.getHeight());int sw=Math.min(b.getWidth(),Math.round(dest.width()/scale)),sh=Math.min(b.getHeight(),Math.round(dest.height()/scale));int x=(b.getWidth()-sw)/2,y=(b.getHeight()-sh)/2;c.drawBitmap(b,new Rect(x,y,x+sw,y+sh),dest,p);b.recycle();}p.setColor(Ui.themeText(style));p.setTextAlign(Paint.Align.CENTER);p.setTypeface(Typeface.create("sans-serif-medium",Typeface.NORMAL));p.setTextSize(44);c.drawText("PHOTOBESOK STUDIO",w/2f,1700,p);p.setTypeface(Typeface.create("serif",Typeface.ITALIC));p.setTextSize(28);String caption=event();while(p.measureText(caption)>w-140&&p.getTextSize()>14)p.setTextSize(p.getTextSize()-1);c.drawText(caption,w/2f,1750,p);File overlay=new File(getFilesDir(),"overlay.png");if(overlay.exists()){Bitmap b=BitmapFactory.decodeFile(overlay.getAbsolutePath());if(b!=null){c.drawBitmap(b,null,new Rect(0,0,w,h),p);b.recycle();}}composed=out;}
+ private void review(){page="review";try{compose();}catch(Exception e){toast("Gagal menyiapkan hasil: "+e.getMessage());go("layout");return;}base(Ui.PAPER);header("Ulangi sesi",()->new AlertDialog.Builder(this).setTitle("Ambil ulang semua foto?").setMessage("Hasil sesi ini akan diganti setelah pengambilan baru selesai.").setNegativeButton("Batal",null).setPositiveButton("Ambil ulang",(a,b)->startCamera()).show(),false);Ui.gap(root,20);label("03 / HASIL SESIMU");title("Ini cerita kamu.","Cek hasilnya, lalu simpan momenmu.");ImageView image=new ImageView(this);image.setImageBitmap(composed);image.setScaleType(ImageView.ScaleType.FIT_CENTER);image.setContentDescription("Hasil kolase "+slots+" foto");root.addView(image,new LinearLayout.LayoutParams(-1,d(getResources().getConfiguration().screenWidthDp>=650?500:355)));Ui.gap(root,20);wideButton(root,saving?"Menyimpan…":"Simpan foto   ↓",true,this::save);Ui.gap(root,12);wideButton(root,"Cetak foto",false,this::printAndroid);Ui.gap(root,12);root.addView(Ui.text(this,"1200 × 1800 px  ·  PNG  ·  Tersimpan di perangkat",12,Ui.MUTED,false));}
+ private void save(){if(saving||composed==null)return;saving=true;final Bitmap image=composed;Toast.makeText(this,"Menyimpan foto…",Toast.LENGTH_SHORT).show();io.execute(()->{Uri uri=null;try{ContentValues v=new ContentValues();v.put(MediaStore.Images.Media.DISPLAY_NAME,"Photobesok_"+System.currentTimeMillis()+".png");v.put(MediaStore.Images.Media.MIME_TYPE,"image/png");v.put(MediaStore.Images.Media.RELATIVE_PATH,"Pictures/Photobesok");v.put(MediaStore.Images.Media.IS_PENDING,1);uri=getContentResolver().insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI,v);if(uri==null)throw new IOException("Penyimpanan tidak tersedia");try(OutputStream out=getContentResolver().openOutputStream(uri)){if(out==null||!image.compress(Bitmap.CompressFormat.PNG,100,out))throw new IOException("Gagal menulis foto");}v.clear();v.put(MediaStore.Images.Media.IS_PENDING,0);getContentResolver().update(uri,v,null,null);final Uri result=uri;runOnUiThread(()->{saving=false;saved=result;if(!isDestroyed())go("done");});}catch(Exception e){if(uri!=null)getContentResolver().delete(uri,null,null);runOnUiThread(()->{saving=false;toast("Belum tersimpan: "+e.getMessage());});}});}
+ private void done(){page="done";base(Ui.PAPER);header(null,null,false);Ui.gap(root,50);TextView check=Ui.text(this,"✓",64,Ui.INK,true);check.setGravity(Gravity.CENTER);root.addView(check);Ui.gap(root,24);title("Momenmu tersimpan.","Buka Galeri → Pictures / Photobesok.\nTerima kasih sudah berbagi senyum hari ini.");if(composed!=null){ImageView img=new ImageView(this);img.setImageBitmap(composed);img.setScaleType(ImageView.ScaleType.FIT_CENTER);root.addView(img,new LinearLayout.LayoutParams(-1,d(280)));}Ui.gap(root,24);wideButton(root,"Bagikan foto",true,()->{Intent share=new Intent(Intent.ACTION_SEND).setType("image/png").putExtra(Intent.EXTRA_STREAM,saved).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);startActivity(Intent.createChooser(share,"Bagikan momenmu"));});Ui.gap(root,12);wideButton(root,"Sesi berikutnya   →",false,()->{newSession();go("home");});Ui.gap(root,12);wideButton(root,"Kembali ke hasil",false,()->go("review"));}
+ private EditText field(String caption,String value){root.addView(Ui.text(this,caption,13,Ui.INK,true));Ui.gap(root,8);EditText e=new EditText(this);e.setSingleLine();e.setText(value);e.setTextColor(Ui.INK);e.setTextSize(16);e.setPadding(d(16),d(12),d(16),d(12));e.setBackground(Ui.border(this,Color.WHITE,false));root.addView(e,new LinearLayout.LayoutParams(-1,d(56)));Ui.gap(root,18);return e;}
+ private void settings(){page="settings";base(Ui.PAPER);header("Tutup",()->go("home"),false);Ui.gap(root,24);label("STUDIO / PENGATURAN");title("Siapkan booth.","Pengaturan disimpan di perangkat ini.");EditText name=field("Nama acara / teks pada hasil",event());name.setFilters(new android.text.InputFilter[]{new android.text.InputFilter.LengthFilter(60)});EditText timer=field("Hitung mundur (2–10 detik)",""+prefs.getInt("timer",3));timer.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);EditText ip=field("Alamat IP printer",prefs.getString("ip","192.168.1.50"));Switch front=new Switch(this);front.setText("Gunakan kamera depan");front.setChecked(prefs.getBoolean("front",true));root.addView(front,new LinearLayout.LayoutParams(-1,d(52)));Switch mirror=new Switch(this);mirror.setText("Cerminkan hasil foto");mirror.setChecked(prefs.getBoolean("mirror",false));root.addView(mirror,new LinearLayout.LayoutParams(-1,d(52)));Ui.gap(root,20);wideButton(root,"Simpan pengaturan",true,()->{try{int seconds=Integer.parseInt(timer.getText().toString());if(seconds<2||seconds>10)throw new IllegalArgumentException();prefs.edit().putString("event",name.getText().toString().trim()).putInt("timer",seconds).putString("ip",ip.getText().toString().trim()).putBoolean("front",front.isChecked()).putBoolean("mirror",mirror.isChecked()).apply();toast("Pengaturan tersimpan");go("home");}catch(Exception e){toast("Hitung mundur harus 2 sampai 10 detik");}});Ui.gap(root,26);label("FRAME TAMBAHAN");root.addView(Ui.text(this,new File(getFilesDir(),"overlay.png").exists()?"Overlay PNG aktif. Gunakan lubang transparan sesuai layout.":"Opsional: overlay PNG transparan, rasio 2:3.",14,Ui.MUTED,false));Ui.gap(root,12);wideButton(root,"Impor overlay PNG",false,()->startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("image/png").addCategory(Intent.CATEGORY_OPENABLE),FRAME));Ui.gap(root,10);wideButton(root,"Hapus overlay",false,()->{new File(getFilesDir(),"overlay.png").delete();settings();});Ui.gap(root,26);label("PRINTER LOKAL");wideButton(root,"Uji koneksi port 515",false,()->{String host=ip.getText().toString().trim();io.execute(()->{String message;try(Socket socket=new Socket()){socket.connect(new InetSocketAddress(host,515),3000);message="Port 515 terbuka. Ini belum membuktikan kemampuan mencetak.";}catch(Exception e){message="Printer belum terhubung. Periksa Wi-Fi dan IP.";}final String m=message;runOnUiThread(()->toast(m));});});Ui.gap(root,12);wideButton(root,"Buka layanan cetak Android",false,()->{try{startActivity(new Intent(android.provider.Settings.ACTION_PRINT_SETTINGS));}catch(Exception e){toast("Pengaturan cetak tidak tersedia");}});Ui.gap(root,14);root.addView(Ui.text(this,"Cetak memakai layanan Android yang terpasang. LPR langsung belum tersedia. Kamera dan penyimpanan dapat dipakai tanpa internet.\n\nPHOTOBESOK / STUDIO 0.5",13,Ui.MUTED,false));}
+  private void printAndroid(){if(composed==null||paths.size()<slots){toast("Lengkapi semua foto terlebih dahulu");return;}android.print.PrintManager pm=(android.print.PrintManager)getSystemService(PRINT_SERVICE);if(pm==null){toast("Layanan cetak Android tidak tersedia");return;}
     final Bitmap bitmap=composed;pm.print("Photobesok",new android.print.PrintDocumentAdapter(){
-      @Override public void onLayout(android.print.PrintAttributes old,android.print.PrintAttributes attrs,android.os.CancellationSignal signal,LayoutResultCallback callback,Bundle extras){android.print.PrintDocumentInfo info=new android.print.PrintDocumentInfo.Builder("photobesok.pdf").setContentType(android.print.PrintDocumentInfo.CONTENT_TYPE_PHOTO).setPageCount(1).build();callback.onLayoutFinished(info,true);}
-      @Override public void onWrite(android.print.PageRange[] pages,android.os.ParcelFileDescriptor dest,android.os.CancellationSignal signal,WriteResultCallback callback){android.graphics.pdf.PdfDocument pdf=new android.graphics.pdf.PdfDocument();try{android.graphics.pdf.PdfDocument.PageInfo pi=new android.graphics.pdf.PdfDocument.PageInfo.Builder(bitmap.getWidth(),bitmap.getHeight(),1).create();android.graphics.pdf.PdfDocument.Page page=pdf.startPage(pi);page.getCanvas().drawBitmap(bitmap,null,new Rect(0,0,bitmap.getWidth(),bitmap.getHeight()),new Paint(3));pdf.finishPage(page);try(FileOutputStream out=new FileOutputStream(dest.getFileDescriptor())){pdf.writeTo(out);}callback.onWriteFinished(new android.print.PageRange[]{android.print.PageRange.ALL_PAGES});}catch(Exception e){callback.onWriteFailed(e.getMessage());}finally{pdf.close();}}
-    },null);
+      android.print.PrintAttributes attributes;
+      @Override public void onLayout(android.print.PrintAttributes old,android.print.PrintAttributes attrs,android.os.CancellationSignal signal,LayoutResultCallback callback,Bundle extras){attributes=attrs;if(signal.isCanceled()){callback.onLayoutCancelled();return;}callback.onLayoutFinished(new android.print.PrintDocumentInfo.Builder("photobesok.pdf").setContentType(android.print.PrintDocumentInfo.CONTENT_TYPE_PHOTO).setPageCount(1).build(),true);}
+      @Override public void onWrite(android.print.PageRange[] pages,android.os.ParcelFileDescriptor dest,android.os.CancellationSignal signal,WriteResultCallback callback){
+        if(signal.isCanceled()){callback.onWriteCancelled();return;}
+        boolean wanted=false;for(android.print.PageRange range:pages)if(range.getStart()<=0&&range.getEnd()>=0)wanted=true;
+        if(!wanted){callback.onWriteFinished(new android.print.PageRange[0]);return;}
+        android.print.pdf.PrintedPdfDocument pdf=new android.print.pdf.PrintedPdfDocument(MainActivity.this,attributes);
+        try{android.graphics.pdf.PdfDocument.Page page=pdf.startPage(0);Rect area=page.getInfo().getContentRect();float scale=Math.min((float)area.width()/bitmap.getWidth(),(float)area.height()/bitmap.getHeight());float w=bitmap.getWidth()*scale,h=bitmap.getHeight()*scale;float x=area.left+(area.width()-w)/2,y=area.top+(area.height()-h)/2;page.getCanvas().drawBitmap(bitmap,null,new RectF(x,y,x+w,y+h),new Paint(3));pdf.finishPage(page);if(signal.isCanceled()){callback.onWriteCancelled();return;}try(FileOutputStream out=new FileOutputStream(dest.getFileDescriptor())){pdf.writeTo(out);}callback.onWriteFinished(new android.print.PageRange[]{new android.print.PageRange(0,0)});}catch(Exception e){callback.onWriteFailed(e.getMessage());}finally{pdf.close();}
+      }
+    },new android.print.PrintAttributes.Builder().setMediaSize(new android.print.PrintAttributes.MediaSize("PHOTO_4R","4R",4000,6000)).setMinMargins(android.print.PrintAttributes.Margins.NO_MARGINS).build());
   }
-  private void toast(String s){Toast.makeText(this,s,Toast.LENGTH_LONG).show();}
-  @Override protected void onDestroy(){io.shutdownNow();super.onDestroy();}
+
+
+ private void toast(String s){Toast.makeText(this,s,Toast.LENGTH_LONG).show();}
+ @Override public void onBackPressed(){if(saving)return;if("home".equals(page)){super.onBackPressed();return;}if("review".equals(page)){new AlertDialog.Builder(this).setTitle("Keluar dari sesi?").setMessage("Simpan foto terlebih dahulu jika ingin menyimpannya.").setNegativeButton("Tetap di sini",null).setPositiveButton("Keluar",(a,b)->{newSession();go("home");}).show();}else go("home");}
+ @Override public void onWindowFocusChanged(boolean focus){super.onWindowFocusChanged(focus);if(focus)Ui.full(this);}
+ @Override protected void onDestroy(){io.shutdown();super.onDestroy();}
 }
